@@ -1,6 +1,15 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-import sqlite3
+import pyodbc
+
+# ===== KẾT NỐI SQL SERVER =====
+def get_conn():
+    return pyodbc.connect(
+        "DRIVER={ODBC Driver 17 for SQL Server};"
+        "SERVER=NguyenQuangAnh;"
+        "DATABASE=ShopThoiTrang_Python;"
+        "Trusted_Connection=yes;"
+    )
 
 def giao_dien_khachhang(frame):
 
@@ -16,9 +25,9 @@ def giao_dien_khachhang(frame):
     entries = []
 
     for i, text in enumerate(labels):
-        tk.Label(form, text=text).grid(row=i, column=0)
+        tk.Label(form, text=text).grid(row=i, column=0, padx=5, pady=5)
         e = tk.Entry(form)
-        e.grid(row=i, column=1)
+        e.grid(row=i, column=1, padx=5, pady=5)
         entries.append(e)
 
     tree = ttk.Treeview(frame)
@@ -32,30 +41,57 @@ def giao_dien_khachhang(frame):
     tree.heading("sl", text="SL")
     tree.heading("tong", text="Tổng")
 
+    tree.column("#0", width=50)
     tree.pack(fill="both", expand=True)
 
-    conn = sqlite3.connect("shop.db")
-    cursor = conn.cursor()
-
-    # ================= LOAD =================
+    # =============================
+    # LOAD DATA TỪ DATABASE
+    # =============================
     def load():
+        conn = get_conn()
+        cursor = conn.cursor()
+
         tree.delete(*tree.get_children())
-        for row in cursor.execute("SELECT * FROM khachhang"):
+
+        cursor.execute("SELECT * FROM KhachHang")
+        for row in cursor.fetchall():
             tree.insert("", "end", text=row[0], values=row[1:])
 
-    # ================= THÊM =================
+        conn.close()
+
+    # =============================
+    def clear():
+        for e in entries:
+            e.delete(0, tk.END)
+
+    # =============================
+    # THÊM
+    # =============================
     def them():
         data = [e.get() for e in entries]
 
-        cursor.execute(
-            "INSERT INTO khachhang(taikhoan,ten,sdt,diachi,soluongmua,tongtien) VALUES(?,?,?,?,?,?)",
-            data
-        )
-        conn.commit()
-        load()
+        if "" in data:
+            messagebox.showwarning("Lỗi", "Nhập đầy đủ thông tin")
+            return
 
-    # ================= CLICK TREE -> ĐỔ DỮ LIỆU =================
-    def chon(event):
+        conn = get_conn()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO KhachHang (TaiKhoan, Ten, SDT, DiaChi, SoLuongMua, TongTien)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, data)
+
+        conn.commit()
+        conn.close()
+
+        load()
+        clear()
+
+    # =============================
+    # CHỌN DÒNG
+    # =============================
+    def chon_dong(event):
         item = tree.selection()
         if item:
             values = tree.item(item)["values"]
@@ -63,43 +99,64 @@ def giao_dien_khachhang(frame):
                 entries[i].delete(0, tk.END)
                 entries[i].insert(0, values[i])
 
-    tree.bind("<<TreeviewSelect>>", chon)
-
-    # ================= SỬA =================
+    # =============================
+    # SỬA
+    # =============================
     def sua():
         item = tree.selection()
         if not item:
-            messagebox.showwarning("Lỗi", "Chọn khách hàng để sửa!")
+            messagebox.showwarning("Lỗi", "Chọn dòng cần sửa")
             return
 
-        id = tree.item(item)["text"]
+        id_selected = tree.item(item)["text"]
         data = [e.get() for e in entries]
 
-        cursor.execute(
-            """UPDATE khachhang 
-               SET taikhoan=?, ten=?, sdt=?, diachi=?, soluongmua=?, tongtien=? 
-               WHERE id=?""",
-            data + [id]
-        )
-        conn.commit()
-        load()
+        conn = get_conn()
+        cursor = conn.cursor()
 
-    # ================= XOÁ =================
+        cursor.execute("""
+            UPDATE KhachHang
+            SET TaiKhoan=?, Ten=?, SDT=?, DiaChi=?, SoLuongMua=?, TongTien=?
+            WHERE MaKH=?
+        """, data + [id_selected])
+
+        conn.commit()
+        conn.close()
+
+        load()
+        clear()
+
+    # =============================
+    # XÓA
+    # =============================
     def xoa():
         item = tree.selection()
         if not item:
-            messagebox.showwarning("Lỗi", "Chọn khách hàng để xoá!")
+            messagebox.showwarning("Lỗi", "Chọn dòng cần xóa")
             return
 
-        id = tree.item(item)["text"]
+        id_selected = tree.item(item)["text"]
 
-        cursor.execute("DELETE FROM khachhang WHERE id=?", (id,))
+        conn = get_conn()
+        cursor = conn.cursor()
+
+        cursor.execute("DELETE FROM KhachHang WHERE MaKH=?", id_selected)
+
         conn.commit()
+        conn.close()
+
         load()
+        clear()
 
-    # ================= BUTTON =================
-    tk.Button(form, text="Thêm", command=them).grid(row=7, column=0)
-    tk.Button(form, text="Sửa", command=sua).grid(row=7, column=1)
-    tk.Button(form, text="Xoá", command=xoa).grid(row=7, column=2)
+    tree.bind("<<TreeviewSelect>>", chon_dong)
 
+    btn_frame = tk.Frame(frame)
+    btn_frame.pack(pady=10)
+
+    tk.Button(btn_frame, text="Thêm", command=them).grid(row=0, column=0, padx=5)
+    tk.Button(btn_frame, text="Sửa", command=sua).grid(row=0, column=1, padx=5)
+    tk.Button(btn_frame, text="Xóa", command=xoa).grid(row=0, column=2, padx=5)
+    tk.Button(btn_frame, text="Clear", command=clear).grid(row=0, column=3, padx=5)
+
+    # LOAD LẦN ĐẦU
     load()
