@@ -1,14 +1,28 @@
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
-import sqlite3
+import pyodbc
+
+# =========================================================
+# ===== KẾT NỐI SQL SERVER =====
+# =========================================================
+def connect_db():
+    conn = pyodbc.connect(
+        "DRIVER={ODBC Driver 17 for SQL Server};"
+        "SERVER=NguyenQuangAnh;"
+        "DATABASE=ShopThoiTrang_Python;"
+        "Trusted_Connection=yes;"
+    )
+    return conn, conn.cursor()
+
 
 def giao_dien_sanpham(frame):
 
-    # ===== CLEAR =====
+    # ===== CLEAR UI =====
     for w in frame.winfo_children():
         w.destroy()
 
+    # ===== TIÊU ĐỀ =====
     tk.Label(frame, text="QUẢN LÝ SẢN PHẨM",
              font=("Arial", 20, "bold"),
              bg="#ecf0f1").pack(pady=10)
@@ -16,7 +30,9 @@ def giao_dien_sanpham(frame):
     main = tk.Frame(frame, bg="#ecf0f1")
     main.pack(fill="both", expand=True, padx=20)
 
-    # ===== FORM =====
+    # =========================================================
+    # ===== FORM NHẬP (UI) =====
+    # =========================================================
     form = tk.Frame(main, bg="#ecf0f1")
     form.pack(pady=10)
 
@@ -30,7 +46,9 @@ def giao_dien_sanpham(frame):
     gia = row("Giá", 1)
     sl = row("Số lượng", 2)
 
+    # =========================================================
     # ===== ẢNH =====
+    # =========================================================
     img_label = tk.Label(form, bg="#ecf0f1")
     img_label.grid(row=0, column=2, rowspan=4, padx=20)
 
@@ -52,22 +70,14 @@ def giao_dien_sanpham(frame):
               bg="#2980b9", fg="white",
               command=chon_anh).grid(row=3, column=2)
 
-    # ===== DATABASE =====
-    conn = sqlite3.connect("shop.db")
-    cursor = conn.cursor()
+    # =========================================================
+    # ===== KẾT NỐI DB =====
+    # =========================================================
+    conn, cursor = connect_db()
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS sanpham(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ten TEXT,
-            gia INTEGER,
-            soluong INTEGER,
-            anh TEXT
-        )
-    """)
-    conn.commit()
-
+    # =========================================================
     # ===== TABLE =====
+    # =========================================================
     tree = ttk.Treeview(main, columns=("id","ten","gia","sl"), show="headings")
     tree.heading("id", text="ID")
     tree.heading("ten", text="Tên")
@@ -78,13 +88,34 @@ def giao_dien_sanpham(frame):
 
     selected_id = None
 
-    # ===== LOAD =====
+    # =========================================================
+    # ===== FUNCTIONS =====
+    # =========================================================
+
     def load():
         tree.delete(*tree.get_children())
-        for row in cursor.execute("SELECT id,ten,gia,soluong FROM sanpham"):
-            tree.insert("", "end", values=row)
+        cursor.execute("""
+            SELECT MaSanPham, TenSanPham, Gia, SoLuong 
+            FROM SanPham
+        """)
+        for row in cursor.fetchall():
+            tree.insert("", "end", values=(
+                int(row[0]),
+                row[1],
+                float(row[2]),
+                int(row[3])
+            ))
 
-    # ===== CLICK =====
+    def clear():
+        nonlocal img_path, selected_id
+        ten.delete(0, tk.END)
+        gia.delete(0, tk.END)
+        sl.delete(0, tk.END)
+        img_label.config(image="")
+        img_label.image = None
+        img_path = None
+        selected_id = None
+
     def on_select(event):
         nonlocal selected_id, img_path
 
@@ -94,6 +125,10 @@ def giao_dien_sanpham(frame):
             data = item["values"]
 
             selected_id = data[0]
+            if isinstance(selected_id, tuple):
+                selected_id = selected_id[0]
+
+            selected_id = int(selected_id)
 
             ten.delete(0, tk.END)
             gia.delete(0, tk.END)
@@ -103,8 +138,10 @@ def giao_dien_sanpham(frame):
             gia.insert(0, data[2])
             sl.insert(0, data[3])
 
-            # load ảnh
-            cursor.execute("SELECT anh FROM sanpham WHERE id=?", (selected_id,))
+            cursor.execute(
+                "SELECT HinhAnh FROM SanPham WHERE MaSanPham=?",
+                (selected_id,)
+            )
             result = cursor.fetchone()
 
             if result and result[0]:
@@ -117,43 +154,55 @@ def giao_dien_sanpham(frame):
                     img_label.config(image=img)
                     img_label.image = img
                 except:
-                    pass
+                    img_label.config(image="")
 
     tree.bind("<<TreeviewSelect>>", on_select)
 
     # ===== THÊM =====
     def them():
-        cursor.execute(
-            "INSERT INTO sanpham(ten,gia,soluong,anh) VALUES(?,?,?,?)",
-            (ten.get(), gia.get(), sl.get(), img_path)
-        )
+        if ten.get() == "" or gia.get() == "" or sl.get() == "":
+            messagebox.showwarning("Lỗi", "Nhập đầy đủ thông tin")
+            return
+
+        cursor.execute("""
+            INSERT INTO SanPham (TenSanPham, Gia, SoLuong, MaDanhMuc, HinhAnh)
+            VALUES (?, ?, ?, NULL, ?)
+        """, (ten.get(), float(gia.get()), int(sl.get()), img_path))
+
         conn.commit()
         load()
+        clear()
 
     # ===== SỬA =====
     def sua():
         if selected_id is None:
+            messagebox.showwarning("Lỗi", "Chọn sản phẩm cần sửa")
             return
 
         cursor.execute("""
-            UPDATE sanpham
-            SET ten=?, gia=?, soluong=?, anh=?
-            WHERE id=?
-        """, (ten.get(), gia.get(), sl.get(), img_path, selected_id))
+            UPDATE SanPham
+            SET TenSanPham=?, Gia=?, SoLuong=?, MaDanhMuc=NULL, HinhAnh=?
+            WHERE MaSanPham=?
+        """, (ten.get(), float(gia.get()), int(sl.get()), img_path, selected_id))
 
         conn.commit()
         load()
+        clear()
 
     # ===== XÓA =====
     def xoa():
         if selected_id is None:
+            messagebox.showwarning("Lỗi", "Chọn sản phẩm cần xóa")
             return
 
-        cursor.execute("DELETE FROM sanpham WHERE id=?", (selected_id,))
+        cursor.execute("DELETE FROM SanPham WHERE MaSanPham=?", (selected_id,))
         conn.commit()
         load()
+        clear()
 
+    # =========================================================
     # ===== BUTTON =====
+    # =========================================================
     btn_frame = tk.Frame(main, bg="#ecf0f1")
     btn_frame.pack(pady=10)
 
@@ -165,5 +214,8 @@ def giao_dien_sanpham(frame):
 
     tk.Button(btn_frame, text="Xóa", bg="red", fg="white",
               width=12, command=xoa).pack(side="left", padx=5)
+
+    tk.Button(btn_frame, text="Clear",
+              width=12, command=clear).pack(side="left", padx=5)
 
     load()
